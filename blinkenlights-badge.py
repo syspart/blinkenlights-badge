@@ -1,7 +1,18 @@
 #!/usr/bin/python3
 ################################################
 #
-# Setup of WS2801 device
+# Run Blinkenlights movies on LED name badge
+# https://www.berrybase.de/computer/pc-peripheriegeraete/usb-gadgets/led-name-tag-11x44-pixel-usb 
+#
+# links:
+#
+# https://github.com/jnweiger/led-name-badge-ls32
+# https://github.com/DirkReiners/LEDBadgeProgrammer
+# https://github.com/ghewgill/ledbadge
+# bluetooth
+# https://github.com/Nilhcem/ble-led-name-badge-android
+# https://github.com/Doridian/ledbadge
+# https://github.com/M4GNV5/BluetoothLEDBadge
 #
 ################################################
 
@@ -10,7 +21,12 @@ from datetime import datetime
 from array import array
 import blinkentools as blt
 
-debug = False
+
+################################################
+#
+# Lookup table to transcode gray shade movies to b/w movies
+#
+################################################
 
 lut1Bit=[0,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255]
 lut2Bit=[0, 15, 41,255,255,255,255,255,255,255,255,255,255,255,255,255]
@@ -19,27 +35,29 @@ lut4Bit=[0,  1,  2,  4,  6,  8, 11, 15, 19, 22, 30, 41, 58, 85,130,255]
 
 ################################################
 #
-# Setup of Led Tag
+# Setup of LED badge
 #
 ################################################
 
 import usb.core
 
 class ledNameTag ():
-	"""Sets up the LED name tag."""
+	"""Sets up the LED name badge."""
 
 	def __init__(self):
 		"""Define the LED name tag display provided by BerryBase (sertronic).
 		USB vendor is 0x0416 and product id is 0x5020.
-		The header is set with brightnes=25%, speeed=4 and mode=animation.
+		The dimension is 48x11 pixel, only 44x11 are shown.
+		The header is set width brightnes=25%, speeed=4 and mode=animation.
 		"""
 
 		self.vendor	= 0x0416
 		self.product	= 0x5020
-		self.height	= 11			# Rows of display
-		self.width	= 44			# Columns of display
-		self.charWidth	= 8			# Columns of a char
-		self.dispChars	= (self.width+7)//8	# Display buffer has 48 pixel, but only 44 are shown
+		self.dRows	= 11			# Rows of display
+		self.dCols	= 44			# Columns of display
+		self.fCols	= 48			# Columns of frame
+		self.bCols	= 8			# Columns of a buffer
+		self.fBuffers	= (self.fCols+(self.bCols)-1)//self.bCols	# Display buffer has 48 pixel, but only 44 are shown
 
 		self.device = usb.core.find(idVendor=self.vendor, idProduct=self.product)
 
@@ -53,14 +71,12 @@ class ledNameTag ():
 
 		print("using [%s %s] bus=%x dev=%x" % (self.device.manufacturer, self.device.product, self.device.bus, self.device.address))
 
-
+		self.ioSlot = 0
 		self.ioBuf =   [0x77, 0x61, 0x6e, 0x67, 0x00, 0x30, 0x00, 0x00, # 'wang' +0 + brightness( 30 =25 %)
-				0x45, 0x45, 0x45, 0x45, 0x45, 0x45, 0x45, 0x45, # (slot 0-7) speed=4 and mode=animation
+				0x15, 0x15, 0x45, 0x45, 0x45, 0x45, 0x45, 0x45, # (slot 0-7) speed=4 and mode=animation
 				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, # (slot 0-7) size of buffer
 				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
-		self.ioSlot = 0
-
 # Brightness
 		br = 3	# 3 = 25%, 2 = 50%, 1=75%, 0 =100%
 		self.ioBuf[5] = (br & 3)<< 4
@@ -87,10 +103,10 @@ class ledNameTag ():
 
 		self.ioBuf[8+self.ioSlot] = ((speed & 7) << 4) + 5	# speed + "animation"
 
-		missingBytes = self.height - (len(moviebuffer) % self.height)
-		if missingBytes < self.height:
+		missingBytes = self.dRows - (len(moviebuffer) % self.dRows)
+		if missingBytes < self.dRows:
 			moviebuffer.extend( (0,) * missingBytes)
-		dm = len(moviebuffer) // self.height
+		dm = len(moviebuffer) // self.dRows
 		self.ioBuf[16+(2*self.ioSlot)] = dm // 256	#
 		self.ioBuf[17+(2*self.ioSlot)] = dm % 256	#
 		print ('Movie size        = %d bytes' % len(moviebuffer))
@@ -98,23 +114,6 @@ class ledNameTag ():
 		self.ioBuf.extend(moviebuffer)
 		self.ioSlot += 1
 		return
-
-
-	def checkSettings(self,movie):
-		"""Checks the settings of the file and gives the user hints on how to make a better suited animation"""
-		if(movie.width >  self.width):
-			print( "Your animation is too wide. It will be cropped. Ideal width is %d pixels." % self.width)
-
-		if(movie.width < self.width):
-			print("Your animation is not wide enough. Part of the matrix will remain off. Ideal width is %d pixels." % self.width)
-
-		if(movie.height > self.height):
-			print("Your animation is too high. It will be cropped. Ideal height is %d pixels." % self.height)
-
-		if(movie.height < self.height):
-			print("Your animation is not high enough. Part of the matrix will remain off. Ideal height is %d pixels." % self.height)
-		print ("")
-
 
 	def createBuf(self,movie):
 		""" Create an LED buffer for a LED tag.
@@ -132,15 +131,12 @@ class ledNameTag ():
 			lutBit = lut1Bit
 
 		buf = []
-		rows = self.height
-		cols = self.dispChars
 
 		mRows = movie.height
 		mCols = movie.width
 
-		print ("Display dimension = (%dx%d)" % (self.height , self.width))
-		print ("Film dimension    = (%dx%d)" % (mRows , mCols))
-
+		print ("Display dimension = (%dx%d)" % (self.dCols,self.dRows))
+		print ("Film dimension    = (%dx%d)" % (mCols, mRows))
 
 		frmCnt = 0					# we need a frame counte, because the size of a buffer may not exeed 255 clounms => 31 frames
 		for frame in movie.frames:
@@ -165,28 +161,26 @@ class ledNameTag ():
 
 				print ("Sleeptime         = %d" % sleeptime)
 
-			for col in range(cols):			# (x) 8 bit spalten
-				for pixelRow in range (rows):	# (y) zeile
+			for fBuffer in range(self.fBuffers):
+				for pixelRow in range (self.dRows):
 					byte_val = 0
 
-					for bit in range(8):
+					for bCol in range(self.bCols):
 						bit_val = 0
-						pixelCol = 8*col+bit
+						pixelCol = self.bCols*fBuffer+bCol			# Real pixel of movie
 
 						try:
-							if  pixelCol >= mCols or pixelRow >= mRows :
+							if  pixelCol >= mCols or pixelRow >= mRows :	# out of range
 								disp1 = disp2 = disp3 = '0'		# black
-							elif movie.channels == 3 :
-								disp1 = (frame.rows[pixelRow][(3*(pixelCol))+0])	# red / grey
+							elif movie.channels == 3 :			# we have 3 colors
+								disp1 = (frame.rows[pixelRow][(3*(pixelCol))+0])	# red
 								disp2 = (frame.rows[pixelRow][(3*(pixelCol))+1])	# green
 								disp3 = (frame.rows[pixelRow][(3*(pixelCol))+2])	# blue
 							else:
-								disp1 = disp2 = disp3 = (frame.rows[pixelRow][pixelCol]) #
+								disp1 = disp2 = disp3 = (frame.rows[pixelRow][pixelCol]) # grey
 
-						except Exception as e:
+						except Exception as e:				# every other convert error
 							disp1 = disp2 = disp3 = '0'		# black
-
-
 
 						if movie.channels == 3:
 							multR = lutBit[blt.alpha2num(disp1)]
@@ -195,16 +189,16 @@ class ledNameTag ():
 						else:
 							multR = multG = multB = lutBit[blt.alpha2num(disp1)]
 
-
 						if (movie.channels == 1 or movie.channels == 3):
 							lx = ((clr[0]*multR)/255,(clr[1]*multB)/255,(clr[2]*multG)/255)
 
 						else:
-							lx = (0,0,0)
+							lx = (0,0,0)				# not found so it is blak
 
 						if sum(lx) > 0:
-							bit_val = 1 << (7-bit)
+							bit_val = 1 << (7-bCol)
 						byte_val += bit_val
+
 					buf.append(byte_val)
 
 			if frmCnt >= 123:	# 123 frames * 6 * 11 bytes are max lenght!
@@ -219,49 +213,35 @@ class ledNameTag ():
 		buf = array('B')
 		buf.extend(self.ioBuf)
 
-		needpadding = len(buf)%64
-		if needpadding:
-			buf.extend( (0,) * (64-needpadding) )
-
-
 		print ("IO buffer length  = %d byte(s)" % len(buf))
 		if (len(buf)) > 8192:
 			print ("IO buffer too big = %d bytes" % len(buf))
-			print (buf[0:64])
 			exit()
 		else:
 			print("Write ioBuf to USB device")
-			for i in range(int(len(buf)/64)):
-				time.sleep(0.01)
-#				print( buf[i*64:i*64+64])
-				self.device.write(1, buf[i*64:i*64+64])
-
+			self.device.write(1, buf,1000)
 
 if __name__ == "__main__":
 
-#	x = 1<<4
-#	print (x, end='')
-#	print (' newline')
-#	sys.exit()
+	blmDisplay = ledNameTag()
 
 	if (len(sys.argv) < 2):
 		print ("You need to run this script with a filename. Example: 'blinkenpi-led.py test.bml'")
 		print ("Anyway I will start a test.")
 		filename = 'herz.bml'
-#		sys.exit()
+		bmlFilm = blt.blmMovie(filename)
+		blmDisplay.createBuf(bmlFilm)
 
-	elif (len(sys.argv) == 2):
-		script, filename = sys.argv
+	elif (len(sys.argv) < 7):
+
+		for i in range (1,len(sys.argv)):
+			filename = sys.argv[i]
+			bmlFilm = blt.blmMovie(filename)
+			blmDisplay.createBuf(bmlFilm)
 
 	else:
 		print ("Thats to many arguments. You need to run this script with one argument: the filename of the animation you want to play. Example: 'python blinkenpi.py test.bml'")
 		sys.exit()
 
-	blmDisplay = ledNameTag()
-
-	bmlFilm = blt.blmMovie(filename)
-	blmDisplay.checkSettings(bmlFilm)
-
-	blmDisplay.createBuf(bmlFilm)
 
 	blmDisplay.write()
